@@ -1,366 +1,283 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import '../profile_page/dashboard_page.dart';
-import 'login_page.dart';
+import 'package:provider/provider.dart';
+
+import '../state/app_state.dart';
 
 class SignupPage extends StatefulWidget {
   const SignupPage({super.key});
 
   @override
-  _SignupPageState createState() => _SignupPageState();
+  State<SignupPage> createState() => _SignupPageState();
 }
 
 class _SignupPageState extends State<SignupPage> {
-  final TextEditingController nameController = TextEditingController();
-  final TextEditingController emailController = TextEditingController();
-  final TextEditingController passwordController = TextEditingController();
-  final TextEditingController confirmPasswordController = TextEditingController();
-  bool _isPasswordVisible = false;
-  bool _isConfirmPasswordVisible = false;
-  bool _isLoading = false; // Loading state
-  String _selectedRole = 'Course Teacher'; // Default role
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _passwordController = TextEditingController();
+  final TextEditingController _confirmController = TextEditingController();
 
-  final List<String> _roles = [
-    'Course Teacher',
-    'Course Advisor',
-    'Department Head'
-  ]; // Available roles
-
-  final _formKey = GlobalKey<FormState>(); // Form key for validation
-  final FirebaseAuth _auth = FirebaseAuth.instance; // Firebase Auth instance
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 50.0),
-          child: Form(
-            key: _formKey, // Add Form widget
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(height: 40),
-                Center(
-                  child: Text(
-                    "Attendance System of \nRajshahi University of Engineering and Technology",
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.blueGrey,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-                SizedBox(height: 40),
-                Center(
-                  child: Text(
-                    "Create an Account",
-                    style: TextStyle(
-                      fontSize: 32,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.cyan[900],
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-                SizedBox(height: 10),
-                Center(
-                  child: Text(
-                    "Sign up to get started...",
-                    style: TextStyle(
-                      fontSize: 18,
-                      color: Colors.blueGrey,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-                SizedBox(height: 40),
-                _buildTextField(
-                    "Full Name", Icons.person_outline_rounded, false, nameController, null),
-                SizedBox(height: 15),
-                _buildTextField(
-                    "Email", Icons.email_outlined, false, emailController, null),
-                SizedBox(height: 15),
-                _buildTextField(
-                    "Password", Icons.lock_outline_rounded, true, passwordController, () {
-                  setState(() {
-                    _isPasswordVisible = !_isPasswordVisible;
-                  });
-                }),
-                SizedBox(height: 15),
-                _buildTextField("Confirm Password", Icons.lock_outline_rounded, true,
-                    confirmPasswordController, () {
-                      setState(() {
-                        _isConfirmPasswordVisible = !_isConfirmPasswordVisible;
-                      });
-                    }),
-                SizedBox(height: 15),
-                _buildRoleDropdown(), // Role selection dropdown
-                SizedBox(height: 35),
-                Center(
-                  child: ElevatedButton(
-                    onPressed: _isLoading ? null : _signUp,
-                    // Disable button when loading
-                    style: ElevatedButton.styleFrom(
-                      elevation: 2.0,
-                      fixedSize: Size(150, 50),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12.0),
-                      ),
-                    ),
-                    child: _isLoading
-                        ? CircularProgressIndicator(
-                        color: Colors.white) // Show loading indicator
-                        : Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.login_outlined),
-                        SizedBox(width: 9),
-                        Text("Sign Up"),
-                      ],
-                    ),
-                  ),
-                ),
-                SizedBox(height: 10),
-                Center(
-                  child: TextButton(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (context) => LoginPage()),
-                      );
-                    },
-                    child: Text(
-                      "Already have an account? Login",
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: Colors.blueGrey,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTextField(String labelText, IconData icon, bool isPassword,
-      TextEditingController controller, VoidCallback? toggleVisibility) {
-    return Center(
-      child: Material(
-        elevation: 0.5,
-        borderRadius: BorderRadius.circular(12.0),
-        child: SizedBox(
-          width: 500,
-          child: TextFormField(
-            controller: controller,
-            obscureText: isPassword &&
-                !(toggleVisibility == null
-                    ? (_isPasswordVisible || _isConfirmPasswordVisible)
-                    : (labelText == "Password"
-                    ? _isPasswordVisible
-                    : _isConfirmPasswordVisible)),
-            decoration: InputDecoration(
-              prefixIcon: Icon(
-                icon,
-                color: Colors.blueGrey,
-              ),
-              labelStyle: TextStyle(
-                color: Colors.blueGrey,
-                fontSize: 15,
-              ),
-              labelText: labelText,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12.0),
-                borderSide: BorderSide.none,
-              ),
-              suffixIcon: toggleVisibility != null
-                  ? IconButton(
-                icon: Icon(
-                  isPassword
-                      ? (labelText == "Password"
-                      ? (_isPasswordVisible
-                      ? Icons.visibility_outlined
-                      : Icons.visibility_off_outlined)
-                      : (_isConfirmPasswordVisible
-                      ? Icons.visibility_outlined
-                      : Icons.visibility_off_outlined))
-                      : null,
-                  color: Colors.blueGrey,
-                ),
-                onPressed: toggleVisibility,
-              )
-                  : null,
-              contentPadding: EdgeInsets.symmetric(vertical: 15.0),
-            ),
-            validator: (value) {
-              if (labelText == "Confirm Password" && (value == null || value.isEmpty)) {
-                return 'Please $labelText';
-              }
-              if (value == null || value.isEmpty) {
-                return 'Please enter $labelText';
-              }
-              if (labelText == "Email" &&
-                  !RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$')
-                      .hasMatch(value)) {
-                return 'Please enter a valid email';
-              }
-              if (labelText == "Password" && value.length < 6) {
-                return 'Password must be at least 6 characters';
-              }
-              return null;
-            },
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRoleDropdown() {
-    return Center(
-      child: Material(
-        elevation: 0.5,
-        borderRadius: BorderRadius.circular(12.0),
-        child: Container(
-          width: 500,
-          padding: EdgeInsets.symmetric(horizontal: 12.0),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12.0),
-            border: Border.all(color: Colors.blueGrey),
-          ),
-          child: DropdownButton<String>(
-            value: _selectedRole,
-            onChanged: (String? newValue) {
-              setState(() {
-                _selectedRole = newValue!;
-              });
-            },
-            items: _roles.map<DropdownMenuItem<String>>((String value) {
-              return DropdownMenuItem<String>(
-                value: value,
-                child: Text(
-                  value,
-                  style: TextStyle(
-                    color: _getRoleColor(value), // Set color based on role
-                    fontSize: 16,
-                  ),
-                ),
-              );
-            }).toList(),
-            isExpanded: true,
-            underline: SizedBox(), // Remove the default underline
-          ),
-        ),
-      ),
-    );
-  }
-
-  // Helper function to assign colors based on role
-  Color _getRoleColor(String role) {
-    switch (role) {
-      case 'Course Teacher':
-        return Colors.blueGrey; // Blue for Course Teacher
-      case 'Course Advisor':
-        return Colors.blueGrey; // Purple for Course Advisor
-      case 'Department Head':
-        return Colors.blueGrey; // Green for Department Head
-      default:
-        return Colors.black; // Default color
-    }
-  }
-
-  // Sign Up method using Firebase Authentication
-  Future<void> _signUp() async {
-    if (_formKey.currentState!.validate()) {
-      if (passwordController.text != confirmPasswordController.text) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Passwords do not match")),
-        );
-        return;
-      }
-
-      setState(() {
-        _isLoading = true;
-      });
-
-      try {
-        // Create user with email and password
-        UserCredential userCredential = await _auth.createUserWithEmailAndPassword(
-          email: emailController.text.trim(),
-          password: passwordController.text.trim(),
-        );
-
-        User user = userCredential.user!;
-
-        // Update the user's display name
-        await user.updateDisplayName(nameController.text.trim());
-
-        // Store user data in Firestore
-        await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
-          'name': nameController.text.trim(),
-          'email': emailController.text.trim(),
-          'role': _selectedRole,
-          'createdAt': FieldValue.serverTimestamp(),
-        });
-
-        // Send email verification
-        await user.sendEmailVerification();
-
-        // Show a message to the user to verify their email
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Verification email sent! Please check your inbox and verify your email to continue."),
-          ),
-        );
-
-        // Redirect to LoginPage after signup
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => LoginPage()),
-        );
-
-        print("Signup successful, verification email sent, redirecting to login...");
-      } on FirebaseAuthException catch (e) {
-        String errorMessage;
-        switch (e.code) {
-          case 'email-already-in-use':
-            errorMessage = "The email address is already in use by another account.";
-            break;
-          case 'invalid-email':
-            errorMessage = "The email address is not valid.";
-            break;
-          case 'weak-password':
-            errorMessage = "The password is too weak.";
-            break;
-          default:
-            errorMessage = "An error occurred: ${e.message}";
-        }
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(errorMessage)),
-        );
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("An unexpected error occurred: $e")),
-        );
-      } finally {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    }
-  }
+  bool _obscurePassword = true;
+  bool _obscureConfirm = true;
+  bool _isSubmitting = false;
 
   @override
   void dispose() {
-    nameController.dispose();
-    emailController.dispose();
-    passwordController.dispose();
-    confirmPasswordController.dispose();
+    _nameController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
+    _confirmController.dispose();
     super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    FocusScope.of(context).unfocus();
+    setState(() => _isSubmitting = true);
+
+    try {
+      await context.read<AppState>().register(
+        displayName: _nameController.text.trim(),
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('החשבון נוצר בהצלחה')));
+      Navigator.of(context).pop();
+    } on AppStateException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final size = MediaQuery.of(context).size;
+    final isWide = size.width > 900;
+
+    return Scaffold(
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF1AA6B7), Color(0xFF0B7285)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: EdgeInsets.symmetric(
+                horizontal: isWide ? 120 : 24,
+                vertical: 36,
+              ),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 540),
+                child: Card(
+                  elevation: 6,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Icon(
+                              Icons.group_add_outlined,
+                              size: 42,
+                              color: theme.colorScheme.primary,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            'יצירת חשבון צוות חדש',
+                            style: theme.textTheme.headlineSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                            textAlign: TextAlign.right,
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'חשבון הצוות מאפשר לנהל חוגים, קבוצות ורישומי נוכחות באופן מקומי ובטוח.',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: Colors.grey[700],
+                            ),
+                            textAlign: TextAlign.right,
+                          ),
+                          const SizedBox(height: 32),
+                          _buildTextField(
+                            controller: _nameController,
+                            label: 'שם מלא',
+                            validator: (value) {
+                              final text = value?.trim() ?? '';
+                              if (text.isEmpty) {
+                                return 'אנא הזינו שם';
+                              }
+                              return null;
+                            },
+                            prefixIcon: Icons.person_outline,
+                          ),
+                          const SizedBox(height: 18),
+                          _buildTextField(
+                            controller: _emailController,
+                            label: 'דוא"ל',
+                            validator: (value) {
+                              final email = value?.trim() ?? '';
+                              if (email.isEmpty) {
+                                return 'אנא הזינו כתובת דוא"ל';
+                              }
+                              final emailRegex = RegExp(
+                                r'^[^@\s]+@[^@\s]+\.[^@\s]+$',
+                              );
+                              if (!emailRegex.hasMatch(email)) {
+                                return 'כתובת הדוא"ל אינה תקינה';
+                              }
+                              return null;
+                            },
+                            prefixIcon: Icons.alternate_email,
+                            keyboardType: TextInputType.emailAddress,
+                          ),
+                          const SizedBox(height: 18),
+                          _buildTextField(
+                            controller: _passwordController,
+                            label: 'סיסמה',
+                            obscureText: _obscurePassword,
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return 'אנא הזינו סיסמה';
+                              }
+                              if (value.length < 6) {
+                                return 'הסיסמה חייבת להכיל לפחות 6 תווים';
+                              }
+                              return null;
+                            },
+                            prefixIcon: Icons.lock_outline,
+                            suffix: IconButton(
+                              icon: Icon(
+                                _obscurePassword
+                                    ? Icons.visibility_off
+                                    : Icons.visibility,
+                              ),
+                              onPressed: () {
+                                setState(
+                                  () => _obscurePassword = !_obscurePassword,
+                                );
+                              },
+                            ),
+                          ),
+                          const SizedBox(height: 18),
+                          _buildTextField(
+                            controller: _confirmController,
+                            label: 'אישור סיסמה',
+                            obscureText: _obscureConfirm,
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return 'אנא אשרו את הסיסמה';
+                              }
+                              if (value != _passwordController.text) {
+                                return 'הסיסמאות אינן תואמות';
+                              }
+                              return null;
+                            },
+                            prefixIcon: Icons.lock_person_outlined,
+                            suffix: IconButton(
+                              icon: Icon(
+                                _obscureConfirm
+                                    ? Icons.visibility_off
+                                    : Icons.visibility,
+                              ),
+                              onPressed: () {
+                                setState(
+                                  () => _obscureConfirm = !_obscureConfirm,
+                                );
+                              },
+                            ),
+                          ),
+                          const SizedBox(height: 28),
+                          ElevatedButton(
+                            onPressed: _isSubmitting ? null : _submit,
+                            child:
+                                _isSubmitting
+                                    ? const SizedBox(
+                                      height: 24,
+                                      width: 24,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                    : const Text('הרשמה'),
+                          ),
+                          const SizedBox(height: 12),
+                          TextButton(
+                            onPressed:
+                                _isSubmitting
+                                    ? null
+                                    : () {
+                                      Navigator.of(context).pop();
+                                    },
+                            child: const Text(
+                              'כבר יש לכם חשבון? חזרה למסך הכניסה',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTextField({
+    required TextEditingController controller,
+    required String label,
+    required String? Function(String?) validator,
+    bool obscureText = false,
+    TextInputType keyboardType = TextInputType.text,
+    IconData? prefixIcon,
+    Widget? suffix,
+  }) {
+    final theme = Theme.of(context);
+    return TextFormField(
+      controller: controller,
+      validator: validator,
+      obscureText: obscureText,
+      keyboardType: keyboardType,
+      textAlign: TextAlign.right,
+      decoration: InputDecoration(
+        labelText: label,
+        prefixIcon:
+            prefixIcon != null
+                ? Icon(prefixIcon, color: theme.colorScheme.primary)
+                : null,
+        suffixIcon: suffix,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+        filled: true,
+        fillColor: Colors.grey[50],
+      ),
+    );
   }
 }

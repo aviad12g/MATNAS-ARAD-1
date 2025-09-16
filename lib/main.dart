@@ -1,185 +1,116 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
-import 'dart:io' show Platform;
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+
 import 'login_page/login_page.dart';
 import 'profile_page/dashboard_page.dart';
+import 'services/local_storage_service.dart';
+import 'state/app_state.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  final appState = AppState(LocalStorageService());
+  await appState.initialize();
 
-  // Platform specific Firebase initialization
-  if (kIsWeb) {
-    // Web-specific Firebase configuration
-    await Firebase.initializeApp(
-      options: const FirebaseOptions(
-        apiKey: "AIzaSyAZk-0O762ba30uaKg4Z8mKVD10cV0okoM",
-        appId: "1:241623526441:web:af145909d6302fb64f8038",
-        messagingSenderId: "241623526441",
-        projectId: "sams8-3-2025",
-        storageBucket: "sams8-3-2025.firebasestorage.app",
-        authDomain: "sams8-3-2025.firebaseapp.com",
-      ),
-    );
-  } else if (Platform.isWindows) {
-    // Windows-specific Firebase configuration
-    await Firebase.initializeApp(
-      options: const FirebaseOptions(
-        apiKey: "AIzaSyAZk-0O762ba30uaKg4Z8mKVD10cV0okoM",
-        appId: "1:241623526441:windows:af145909d6302fb64f8038",
-        messagingSenderId: "241623526441",
-        projectId: "sams8-3-2025",
-        storageBucket: "sams8-3-2025.firebasestorage.app",
-      ),
-    );
-  } else {
-    // Default (Android/iOS) Firebase configuration
-    await Firebase.initializeApp(
-      options: const FirebaseOptions(
-        apiKey: "AIzaSyAZk-0O762ba30uaKg4Z8mKVD10cV0okoM",
-        appId: "1:241623526441:android:af145909d6302fb64f8038",
-        messagingSenderId: "241623526441",
-        projectId: "sams8-3-2025",
-        storageBucket: "sams8-3-2025.firebasestorage.app",
-      ),
-    );
-  }
-
-  runApp(const MyApp());
+  runApp(MatnasAradApp(appState: appState));
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class MatnasAradApp extends StatelessWidget {
+  const MatnasAradApp({super.key, required this.appState});
+
+  final AppState appState;
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'SAMS',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.white60),
-        useMaterial3: true,
-      ),
-      home: const LoginPageWrapper(),
+    final colorScheme = ColorScheme.fromSeed(
+      seedColor: const Color(0xFF0B7285),
+      brightness: Brightness.light,
     );
-  }
-}
 
-// Wrapper widget to handle authentication state while keeping LoginPage as the base home
-class LoginPageWrapper extends StatelessWidget {
-  const LoginPageWrapper({super.key});
+    final textTheme = GoogleFonts.assistantTextTheme();
 
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<User?>(
-      stream: FirebaseAuth.instance.authStateChanges(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          // Show a loading indicator while checking auth state
-          return const Scaffold(
-            body: Center(
-              child: CircularProgressIndicator(),
+    return ChangeNotifierProvider<AppState>.value(
+      value: appState,
+      child: MaterialApp(
+        debugShowCheckedModeBanner: false,
+        title: 'מתנ"ס ערד - נוכחות',
+        locale: const Locale('he', 'IL'),
+        supportedLocales: const [Locale('he', 'IL')],
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        theme: ThemeData(
+          colorScheme: colorScheme,
+          textTheme: textTheme,
+          useMaterial3: true,
+          scaffoldBackgroundColor: const Color(0xFFF4F6F8),
+          appBarTheme: AppBarTheme(
+            backgroundColor: colorScheme.primary,
+            foregroundColor: Colors.white,
+            elevation: 1,
+            titleTextStyle: textTheme.titleLarge?.copyWith(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
             ),
+          ),
+          snackBarTheme: SnackBarThemeData(
+            backgroundColor: colorScheme.primary,
+            contentTextStyle: textTheme.bodyMedium?.copyWith(
+              color: Colors.white,
+            ),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+          elevatedButtonTheme: ElevatedButtonThemeData(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: colorScheme.primary,
+              foregroundColor: Colors.white,
+              textStyle: textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+            ),
+          ),
+          cardTheme: CardThemeData(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+            ),
+            elevation: 3,
+            margin: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+          ),
+        ),
+        home: const _AppHomeRouter(),
+      ),
+    );
+  }
+}
+
+class _AppHomeRouter extends StatelessWidget {
+  const _AppHomeRouter();
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<AppState>(
+      builder: (context, appState, _) {
+        if (!appState.isInitialized) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
           );
         }
 
-        if (snapshot.hasData) {
-          // User is signed in
-          User user = snapshot.data!;
-          // Check if email is verified
-          if (user.emailVerified) {
-            // Fetch user role from Firestore
-            return FutureBuilder<DocumentSnapshot>(
-              future: FirebaseFirestore.instance
-                  .collection('users')
-                  .doc(user.uid)
-                  .get(),
-              builder: (context, firestoreSnapshot) {
-                if (firestoreSnapshot.connectionState == ConnectionState.waiting) {
-                  return const Scaffold(
-                    body: Center(
-                      child: CircularProgressIndicator(),
-                    ),
-                  );
-                }
-
-                if (firestoreSnapshot.hasError) {
-                  return Scaffold(
-                    body: Center(
-                      child: Text(
-                        "Error loading user data: ${firestoreSnapshot.error}",
-                        style: const TextStyle(fontSize: 18, color: Colors.blueGrey),
-                      ),
-                    ),
-                  );
-                }
-
-                String role = firestoreSnapshot.data?.get('role') ?? 'Course Teacher';
-
-                // Navigate to DashboardPage if email is verified
-                return DashboardPage(
-                  name: user.displayName ?? "User",
-                  email: user.email ?? "",
-                  role: role,
-                );
-              },
-            );
-          } else {
-            // If email is not verified, prompt the user to verify it
-            return Scaffold(
-              body: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Text(
-                      "Please verify your email to continue.",
-                      style: TextStyle(fontSize: 18, color: Colors.blueGrey),
-                    ),
-                    const SizedBox(height: 20),
-                    ElevatedButton(
-                      onPressed: () async {
-                        // Resend verification email
-                        await user.sendEmailVerification();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text("Verification email resent! Please check your inbox."),
-                          ),
-                        );
-                      },
-                      style: ElevatedButton.styleFrom(
-                        elevation: 2.0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12.0),
-                        ),
-                      ),
-                      child: const Text("Resend Verification Email"),
-                    ),
-                    const SizedBox(height: 10),
-                    TextButton(
-                      onPressed: () async {
-                        // Sign out the user and redirect to LoginPage
-                        await FirebaseAuth.instance.signOut();
-                        Navigator.pushReplacement(
-                          context,
-                          MaterialPageRoute(builder: (context) => const LoginPage()),
-                        );
-                      },
-                      child: const Text(
-                        "Sign Out",
-                        style: TextStyle(fontSize: 16, color: Colors.blueGrey),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }
-        } else {
-          // User is not signed in, show LoginPage
+        if (appState.currentUser == null) {
           return const LoginPage();
         }
+
+        return const DashboardPage();
       },
     );
   }

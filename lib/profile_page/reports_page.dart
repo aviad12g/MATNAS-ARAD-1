@@ -1,897 +1,763 @@
-import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:intl/intl.dart';
-import 'package:path_provider/path_provider.dart';
+import 'dart:convert';
+import 'dart:io' as io;
+import 'dart:typed_data';
+
+import 'package:csv/csv.dart';
 import 'package:excel/excel.dart' as excel_lib;
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:open_file/open_file.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:open_file/open_file.dart';
-import 'dart:io';
-import 'package:flutter/foundation.dart';
-import 'package:file_picker/file_picker.dart';
-import 'dart:typed_data';
-import 'web_file_saver.dart'
-    if (dart.library.io) 'web_file_saver_stub.dart';
+import 'package:provider/provider.dart';
+
+import '../models/activity_definition.dart';
+import '../models/attendance_session.dart';
+import '../models/student.dart';
+import '../state/app_state.dart';
+import 'web_file_saver.dart' if (dart.library.io) 'web_file_saver_stub.dart';
 
 class AttendanceReportPage extends StatefulWidget {
   const AttendanceReportPage({super.key});
 
   @override
-  _AttendanceReportPageState createState() => _AttendanceReportPageState();
+  State<AttendanceReportPage> createState() => _AttendanceReportPageState();
 }
 
 class _AttendanceReportPageState extends State<AttendanceReportPage> {
-  String? selectedCourse;
-  String? selectedSection;
-  bool isLoading = false;
-  DateTime startDate = DateTime.now().subtract(const Duration(days: 30));
-  DateTime endDate = DateTime.now();
+  String? _selectedActivityId;
+  String? _selectedGroupId;
+  DateTime _startDate = DateTime.now().subtract(const Duration(days: 30));
+  DateTime _endDate = DateTime.now();
+  bool _isLoading = false;
 
-  final List<String> courses = [
-    "Digital Logic Design",
-    "Discrete Mathematics",
-    "Electrical and Electronic Engineering",
-    "Humanities",
-    "Mathematics"
-  ];
+  final DateFormat _dateFormatter = DateFormat('dd.MM.yyyy', 'he');
+  final DateFormat _keyFormatter = DateFormat('yyyy-MM-dd');
 
-  final List<String> sections = ["A", "B", "C"];
-
-  List<Map<String, dynamic>> students = [];
-  Map<String, Map<String, String>> attendanceData = {};
-  List<String> datesList = [];
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  List<Student> _students = <Student>[];
+  List<DateTime> _dates = <DateTime>[];
+  Map<String, Map<DateTime, AttendanceStatus?>> _matrix =
+      <String, Map<DateTime, AttendanceStatus?>>{};
+  Map<String, double> _percentages = <String, double>{};
 
   @override
-  Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isSmallScreen = screenWidth < 800;
-    final double cardPadding = isSmallScreen ? 16 : 24;
-    final double cardFontSize = isSmallScreen ? 16 : 18;
-    final double buttonFontSize = isSmallScreen ? 16 : 15;
-    final double buttonHeight = isSmallScreen ? 48 : 40;
-    final double maxContentWidth = isSmallScreen ? double.infinity : 700;
-    final double dropdownFontSize = isSmallScreen ? 16 : 15;
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text("Attendance Reports"),
-        backgroundColor: Colors.blueGrey,
-      ),
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: maxContentWidth),
-            child: Padding(
-              padding: EdgeInsets.all(cardPadding),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  // Filter Section
-                  Card(
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    child: Padding(
-                      padding: EdgeInsets.all(cardPadding),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            "Generate Attendance Report",
-                            style: TextStyle(
-                              fontSize: cardFontSize + 2,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                flex: 3,
-                                child: DropdownButtonFormField<String>(
-                                  value: selectedCourse,
-                                  isExpanded: true,
-                                  decoration: InputDecoration(
-                                    labelText: "Select Course",
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(12.0),
-                                    ),
-                                    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                                  ),
-                                  style: TextStyle(fontSize: dropdownFontSize, color: Colors.black),
-                                  items: courses.map((course) {
-                                    return DropdownMenuItem(
-                                      value: course,
-                                      child: Text(course, overflow: TextOverflow.ellipsis),
-                                    );
-                                  }).toList(),
-                                  onChanged: (value) {
-                                    setState(() {
-                                      selectedCourse = value;
-                                    });
-                                  },
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                flex: 2,
-                                child: DropdownButtonFormField<String>(
-                                  value: selectedSection,
-                                  isExpanded: true,
-                                  decoration: InputDecoration(
-                                    labelText: "Select Section",
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(12.0),
-                                    ),
-                                    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                                  ),
-                                  style: TextStyle(fontSize: dropdownFontSize, color: Colors.black),
-                                  items: sections.map((section) {
-                                    return DropdownMenuItem(
-                                      value: section,
-                                      child: Text("$section"),
-                                    );
-                                  }).toList(),
-                                  onChanged: (value) {
-                                    setState(() {
-                                      selectedSection = value;
-                                      _fetchStudents();
-                                    });
-                                  },
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text("Start Date"),
-                                    const SizedBox(height: 8),
-                                    InkWell(
-                                      onTap: () => _selectDate(context, true),
-                                      child: Container(
-                                        padding: const EdgeInsets.all(12),
-                                        decoration: BoxDecoration(
-                                          border: Border.all(color: Colors.grey),
-                                          borderRadius: BorderRadius.circular(8),
-                                        ),
-                                        child: Row(
-                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                          children: [
-                                            Text(DateFormat('yyyy-MM-dd').format(startDate)),
-                                            const Icon(Icons.calendar_today),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text("End Date"),
-                                    const SizedBox(height: 8),
-                                    InkWell(
-                                      onTap: () => _selectDate(context, false),
-                                      child: Container(
-                                        padding: const EdgeInsets.all(12),
-                                        decoration: BoxDecoration(
-                                          border: Border.all(color: Colors.grey),
-                                          borderRadius: BorderRadius.circular(8),
-                                        ),
-                                        child: Row(
-                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                          children: [
-                                            Text(DateFormat('yyyy-MM-dd').format(endDate)),
-                                            const Icon(Icons.calendar_today),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: SizedBox(
-                                  height: buttonHeight + 4,
-                                  child: ElevatedButton.icon(
-                                    onPressed: isLoading ? null : _generateReport,
-                                    icon: const Icon(Icons.refresh),
-                                    label: Text("Generate Report", style: TextStyle(fontSize: buttonFontSize, fontWeight: FontWeight.bold)),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.cyan.shade500,
-                                      foregroundColor: Colors.white,
-                                      elevation: 4,
-                                      shadowColor: Color(0xFF90CAF9),
-                                      padding: EdgeInsets.symmetric(vertical: isSmallScreen ? 0 : 0),
-                                      minimumSize: Size(double.infinity, buttonHeight + 8),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(14),
-                                      ),
-                                      textStyle: TextStyle(letterSpacing: 1.1),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: SizedBox(
-                                  height: buttonHeight + 4,
-                                  child: ElevatedButton.icon(
-                                    onPressed: (attendanceData.isEmpty || isLoading) ? null : _exportToExcel,
-                                    icon: const Icon(Icons.table_chart),
-                                    label: Text("Export to Excel", style: TextStyle(fontSize: buttonFontSize, fontWeight: FontWeight.bold)),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.green.shade600,
-                                      foregroundColor: Colors.white,
-                                      elevation: 4,
-                                      shadowColor: Colors.green.shade100,
-                                      padding: EdgeInsets.symmetric(horizontal: 20, vertical: isSmallScreen ? 0 : 0), // Add horizontal padding
-                                      minimumSize: Size(0, buttonHeight + 8), // Remove forced full width
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(14), // Match other buttons
-                                      ),
-                                      textStyle: TextStyle(letterSpacing: 1.1),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: SizedBox(
-                                  height: buttonHeight + 4,
-                                  child: ElevatedButton.icon(
-                                    onPressed: (attendanceData.isEmpty || isLoading) ? null : _exportToPdf,
-                                    icon: const Icon(Icons.picture_as_pdf),
-                                    label: Text("Export to PDF", style: TextStyle(fontSize: buttonFontSize, fontWeight: FontWeight.bold)),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.red.shade600,
-                                      foregroundColor: Colors.white,
-                                      elevation: 4,
-                                      shadowColor: Colors.red.shade100,
-                                      padding: EdgeInsets.symmetric(vertical: isSmallScreen ? 0 : 0),
-                                      minimumSize: Size(double.infinity, buttonHeight + 8),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(14),
-                                      ),
-                                      textStyle: TextStyle(letterSpacing: 1.1),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  // Report Preview
-                  Expanded(
-                    child: isLoading
-                        ? const Center(child: CircularProgressIndicator())
-                        : (attendanceData.isEmpty)
-                        ? const Center(
-                      child: Text(
-                        "No data to display.\nPlease select course, section and date range and generate report.",
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: Colors.grey,
-                        ),
-                      ),
-                    )
-                        : Card(
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      child: Padding(
-                        padding: EdgeInsets.all(cardPadding),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Text(
-                              "Attendance Report: $selectedCourse - Section $selectedSection",
-                              style: TextStyle(
-                                fontSize: cardFontSize + 2,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            Text(
-                              "Period: [${DateFormat('yyyy-MM-dd').format(startDate)} to ${DateFormat('yyyy-MM-dd').format(endDate)}]",
-                              style: TextStyle(
-                                fontSize: cardFontSize - 2,
-                                color: Colors.grey,
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            Expanded(
-                              child: SingleChildScrollView(
-                                scrollDirection: Axis.horizontal,
-                                child: SingleChildScrollView(
-                                  child: _buildAttendanceTable(),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final appState = context.read<AppState>();
+    if (_selectedActivityId == null && appState.activities.isNotEmpty) {
+      _selectedActivityId = appState.activities.first.id;
+    }
+    if (_selectedActivityId != null && _selectedGroupId == null) {
+      final groups = appState.groupsForActivity(_selectedActivityId!);
+      if (groups.isNotEmpty) {
+        _selectedGroupId = groups.first.id;
+      }
+    }
   }
 
-  Future<void> _selectDate(BuildContext context, bool isStartDate) async {
-    final DateTime? picked = await showDatePicker(
+  Future<void> _selectDate({required bool isStart}) async {
+    final picked = await showDatePicker(
       context: context,
-      initialDate: isStartDate ? startDate : endDate,
+      initialDate: isStart ? _startDate : _endDate,
       firstDate: DateTime(2020),
-      lastDate: DateTime.now(),
+      lastDate: DateTime(2100),
+      locale: const Locale('he'),
     );
 
     if (picked != null) {
       setState(() {
-        if (isStartDate) {
-          startDate = picked;
-          if (startDate.isAfter(endDate)) {
-            endDate = startDate;
+        if (isStart) {
+          _startDate = picked;
+          if (_startDate.isAfter(_endDate)) {
+            _endDate = _startDate;
           }
         } else {
-          endDate = picked;
-          if (endDate.isBefore(startDate)) {
-            startDate = endDate;
+          _endDate = picked;
+          if (_endDate.isBefore(_startDate)) {
+            _startDate = _endDate;
           }
         }
-      });
-    }
-  }
-
-  Future<void> _fetchStudents() async {
-    if (selectedSection == null) return;
-
-    setState(() {
-      isLoading = true;
-      students.clear();
-    });
-
-    try {
-      final querySnapshot = await _firestore
-          .collection('students')
-          .where('section', isEqualTo: selectedSection)
-          .orderBy('roll')
-          .get();
-
-      setState(() {
-        students = querySnapshot.docs.map((doc) {
-          final data = doc.data();
-          return {
-            "rollNo": data['roll'] ?? 0,
-            "id": data['roll']?.toString() ?? '0',
-            "name": data['name'] ?? 'Unknown',
-          };
-        }).toList();
-      });
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Error fetching students: $e")),
-      );
-    } finally {
-      setState(() {
-        isLoading = false;
       });
     }
   }
 
   Future<void> _generateReport() async {
-    if (selectedCourse == null || selectedSection == null || students.isEmpty) {
+    if (_selectedActivityId == null || _selectedGroupId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please select course and section first")),
+        const SnackBar(
+          content: Text('יש לבחור פעילות וקבוצה לפני יצירת דו"ח.'),
+        ),
       );
       return;
     }
 
-    if (mounted) {
-      setState(() {
-        isLoading = true;
-        attendanceData.clear();
-        datesList.clear();
-      });
-    }
+    setState(() {
+      _isLoading = true;
+      _students = <Student>[];
+      _dates = <DateTime>[];
+      _matrix = <String, Map<DateTime, AttendanceStatus?>>{};
+      _percentages = <String, double>{};
+    });
 
     try {
-      // Generate list of dates between start and end date
-      List<DateTime> datesInRange = [];
-      for (DateTime date = startDate;
-      date.isBefore(endDate.add(const Duration(days: 1)));
-      date = date.add(const Duration(days: 1))) {
-        datesInRange.add(date);
-      }
-      datesList = datesInRange.map((date) => DateFormat('yyyy-MM-dd').format(date)).toList();
+      final appState = context.read<AppState>();
+      final students = appState.studentsFor(
+        _selectedActivityId!,
+        _selectedGroupId!,
+      );
+      final dates = _buildDateRange(_startDate, _endDate);
+      final sessions = appState.sessionsInRange(
+        _selectedActivityId!,
+        _selectedGroupId!,
+        _startDate,
+        _endDate,
+      );
+      final sessionsByDate = {
+        for (final session in sessions)
+          _keyFormatter.format(session.date): session,
+      };
 
-      // Initialize attendance data structure
-      for (var student in students) {
-        attendanceData[student['id']] = {};
-        for (var dateStr in datesList) {
-          attendanceData[student['id']]![dateStr] = '-'; // Default to absent
+      final matrix = <String, Map<DateTime, AttendanceStatus?>>{};
+      for (final student in students) {
+        matrix[student.id] = {for (final date in dates) date: null};
+      }
+
+      for (final date in dates) {
+        final session = sessionsByDate[_keyFormatter.format(date)];
+        if (session == null) {
+          continue;
+        }
+        for (final student in students) {
+          matrix[student.id]![date] =
+              session.statuses[student.id] ?? AttendanceStatus.absent;
         }
       }
 
-      // Fetch all attendance records for the section and date range in parallel
-      final List<Future<void>> fetchFutures = [];
-      for (var dateStr in datesList) {
-        fetchFutures.add(_firestore
-            .collection('attendance_records')
-            .doc(dateStr)
-            .collection('sections')
-            .doc(selectedSection)
-            .collection('rolls')
-            .get()
-            .then((rollsSnapshot) async {
-          if (rollsSnapshot.docs.isEmpty) return;
-          final List<Future<void>> courseFutures = [];
-          for (var rollDoc in rollsSnapshot.docs) {
-            final rollNo = rollDoc.id;
-            courseFutures.add(rollDoc.reference
-                .collection('courses')
-                .doc(selectedCourse)
-                .get()
-                .then((courseDoc) {
-              if (courseDoc.exists) {
-                String status = courseDoc.data()?['status'] ?? '-';
-                if (attendanceData.containsKey(rollNo) && attendanceData[rollNo]!.containsKey(dateStr)) {
-                  attendanceData[rollNo]![dateStr] = status == 'Present' ? 'P' : 'A';
-                }
-              }
-            }));
+      final percentages = <String, double>{};
+      for (final student in students) {
+        final entries = matrix[student.id]!;
+        int totalSessions = 0;
+        int presentCount = 0;
+        entries.forEach((date, status) {
+          if (status != null) {
+            totalSessions++;
+            if (status == AttendanceStatus.present) {
+              presentCount++;
+            }
           }
-          await Future.wait(courseFutures);
-        }));
+        });
+        percentages[student.id] =
+            totalSessions == 0 ? 0 : (presentCount / totalSessions) * 100;
       }
-      await Future.wait(fetchFutures);
 
-      if (mounted) {
-        setState(() {
-          isLoading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          isLoading = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error generating report: $e")),
-        );
-      }
+      setState(() {
+        _students = students;
+        _dates = dates;
+        _matrix = matrix;
+        _percentages = percentages;
+        _isLoading = false;
+      });
+    } catch (error) {
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('אירעה שגיאה בעת יצירת הדו"ח: $error')),
+      );
     }
   }
 
-  // Method to calculate attendance percentages
-  Map<String, double> _calculateAttendancePercentages() {
-    Map<String, double> percentages = {};
-
-    for (var student in students) {
-      String studentId = student['id'] ?? '';
-      if (studentId.isEmpty) continue;
-
-      int presentCount = 0;
-      int totalSessions = 0;
-
-      for (var dateStr in datesList) {
-        String status = attendanceData[studentId]?[dateStr] ?? '-';
-        if (status == 'P' || status == 'A') {
-          totalSessions++;
-          if (status == 'P') {
-            presentCount++;
-          }
-        }
-      }
-
-      double percentage = totalSessions > 0 ? (presentCount / totalSessions) * 100 : 0.0;
-      percentages[studentId] = percentage;
+  List<DateTime> _buildDateRange(DateTime start, DateTime end) {
+    final days = <DateTime>[];
+    var cursor = DateTime(start.year, start.month, start.day);
+    final endDate = DateTime(end.year, end.month, end.day);
+    while (!cursor.isAfter(endDate)) {
+      days.add(cursor);
+      cursor = cursor.add(const Duration(days: 1));
     }
-
-    return percentages;
+    return days;
   }
 
-  Widget _buildAttendanceTable() {
-    final percentages = _calculateAttendancePercentages();
+  @override
+  Widget build(BuildContext context) {
+    final appState = context.watch<AppState>();
+    final activities = appState.activities;
+    final groups =
+        _selectedActivityId != null
+            ? appState.groupsForActivity(_selectedActivityId!)
+            : <GroupDefinition>[];
 
-    return DataTable(
-      columnSpacing: 12,
-      headingRowColor: MaterialStateProperty.all(Colors.blueGrey[100]),
-      border: TableBorder.all(color: Colors.grey.shade300),
-      columns: [
-        const DataColumn(
-          label: Text(
-            'Roll',
-            style: TextStyle(fontWeight: FontWeight.bold),
-          ),
-        ),
-        const DataColumn(
-          label: Text(
-            'Name',
-            style: TextStyle(fontWeight: FontWeight.bold),
-          ),
-        ),
-        ...datesList.map(
-              (dateStr) => DataColumn(
-            label: SizedBox(
-              width: 75,
-              child: Text(
-                dateStr.substring(5), // Show only MM-DD
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-            ),
-          ),
-        ),
-        const DataColumn(
-          label: Text(
-            'Attendance %',
-            style: TextStyle(fontWeight: FontWeight.bold),
-          ),
-        ),
-      ],
-      rows: students.map((student) {
-        final studentId = student['id'] ?? '';
-        final percentage = percentages[studentId] ?? 0.0;
-        return DataRow(
-          cells: [
-            DataCell(Text(studentId)),
-            DataCell(Text(student['name'] ?? 'Unknown')),
-            ...datesList.map(
-                  (dateStr) {
-                // Check if the studentId exists in attendanceData and if dateStr exists in the nested map
-                final status = attendanceData[studentId]?[dateStr] ?? '-';
-                return DataCell(
-                  Center(
-                    child: Text(
-                      status,
-                      style: TextStyle(
-                        color: (status == 'P')
-                            ? Colors.green
-                            : ((status == 'A')
-                            ? Colors.red
-                            : Colors.grey),
-                        fontWeight: FontWeight.bold,
-                      ),
+    return Scaffold(
+      appBar: AppBar(title: const Text('דו"חות נוכחות')),
+      body: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Card(
+              elevation: 2,
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: [
+                        SizedBox(
+                          width: 280,
+                          child: DropdownButtonFormField<String>(
+                            value: _selectedActivityId,
+                            decoration: const InputDecoration(
+                              labelText: 'פעילות',
+                              border: OutlineInputBorder(),
+                            ),
+                            items:
+                                activities
+                                    .map(
+                                      (activity) => DropdownMenuItem(
+                                        value: activity.id,
+                                        child: Align(
+                                          alignment: Alignment.centerRight,
+                                          child: Text(activity.name),
+                                        ),
+                                      ),
+                                    )
+                                    .toList(),
+                            onChanged: (value) {
+                              setState(() {
+                                _selectedActivityId = value;
+                                _selectedGroupId = null;
+                              });
+                            },
+                          ),
+                        ),
+                        SizedBox(
+                          width: 240,
+                          child: DropdownButtonFormField<String>(
+                            value: _selectedGroupId,
+                            decoration: const InputDecoration(
+                              labelText: 'קבוצה',
+                              border: OutlineInputBorder(),
+                            ),
+                            items:
+                                groups
+                                    .map(
+                                      (group) => DropdownMenuItem(
+                                        value: group.id,
+                                        child: Align(
+                                          alignment: Alignment.centerRight,
+                                          child: Text(group.name),
+                                        ),
+                                      ),
+                                    )
+                                    .toList(),
+                            onChanged: (value) {
+                              setState(() => _selectedGroupId = value);
+                            },
+                          ),
+                        ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            const Text('מתאריך'),
+                            const SizedBox(height: 6),
+                            OutlinedButton.icon(
+                              onPressed: () => _selectDate(isStart: true),
+                              icon: const Icon(Icons.date_range),
+                              label: Text(_dateFormatter.format(_startDate)),
+                            ),
+                          ],
+                        ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            const Text('עד תאריך'),
+                            const SizedBox(height: 6),
+                            OutlinedButton.icon(
+                              onPressed: () => _selectDate(isStart: false),
+                              icon: const Icon(Icons.event),
+                              label: Text(_dateFormatter.format(_endDate)),
+                            ),
+                          ],
+                        ),
+                        FilledButton.icon(
+                          onPressed: _isLoading ? null : _generateReport,
+                          icon: const Icon(Icons.assessment_outlined),
+                          label: const Text('יצירת דו"ח'),
+                        ),
+                      ],
                     ),
-                  ),
-                );
-              },
-            ),
-            DataCell(
-              Text(
-                '${percentage.toStringAsFixed(1)}%',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: percentage >= 50 ? Colors.green : Colors.red,
+                    const SizedBox(height: 16),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed:
+                              _matrix.isEmpty || _isLoading
+                                  ? null
+                                  : _exportToExcel,
+                          icon: const Icon(Icons.table_chart_outlined),
+                          label: const Text('ייצוא ל-Excel'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed:
+                              _matrix.isEmpty || _isLoading
+                                  ? null
+                                  : _exportToCsv,
+                          icon: const Icon(Icons.file_download_outlined),
+                          label: const Text('ייצוא ל-CSV'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed:
+                              _matrix.isEmpty || _isLoading
+                                  ? null
+                                  : _exportToPdf,
+                          icon: const Icon(Icons.picture_as_pdf_outlined),
+                          label: const Text('ייצוא ל-PDF'),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
             ),
+            const SizedBox(height: 16),
+            Expanded(
+              child:
+                  _isLoading
+                      ? const Center(child: CircularProgressIndicator())
+                      : _matrix.isEmpty
+                      ? Center(
+                        child: Text(
+                          'עדיין לא נוצר דו"ח. בחרו פעילות וקבוצה ולחצו על "יצירת דו"ח".',
+                          style: Theme.of(context).textTheme.titleMedium,
+                          textAlign: TextAlign.center,
+                        ),
+                      )
+                      : Card(
+                        elevation: 2,
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: _ReportTable(
+                            students: _students,
+                            dates: _dates,
+                            matrix: _matrix,
+                            percentages: _percentages,
+                            dateFormatter: _dateFormatter,
+                          ),
+                        ),
+                      ),
+            ),
           ],
-        );
-      }).toList(),
+        ),
+      ),
     );
-  }
-
-  Future<String?> _pickExportLocation(String fileName, String fileType) async {
-    String? savePath;
-    try {
-      String? result = await FilePicker.platform.saveFile(
-        dialogTitle: 'Select location to save $fileName',
-        fileName: fileName,
-        type: FileType.custom,
-        allowedExtensions: [fileType],
-      );
-      if (result != null && result.isNotEmpty) {
-        savePath = result;
-      }
-    } catch (e) {
-      // ignore
-    }
-    return savePath;
   }
 
   Future<void> _exportToExcel() async {
     try {
-      if (mounted) {
-        setState(() {
-          isLoading = true;
-        });
+      setState(() => _isLoading = true);
+      final excel = excel_lib.Excel.createExcel();
+      final sheet = excel['נוכחות'];
+      sheet
+          .cell(
+            excel_lib.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 0),
+          )
+          .value = excel_lib.TextCellValue(
+        'דו"ח נוכחות - ${_dateFormatter.format(_startDate)} עד ${_dateFormatter.format(_endDate)}',
+      );
+
+      sheet
+          .cell(
+            excel_lib.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 2),
+          )
+          .value = excel_lib.TextCellValue('שם החניך/ה');
+      for (var i = 0; i < _dates.length; i++) {
+        sheet
+            .cell(
+              excel_lib.CellIndex.indexByColumnRow(
+                columnIndex: i + 1,
+                rowIndex: 2,
+              ),
+            )
+            .value = excel_lib.TextCellValue(_dateFormatter.format(_dates[i]));
       }
-      final excel_lib.Excel excel = excel_lib.Excel.createExcel();
-      final excel_lib.Sheet sheet = excel['Attendance Report'];
-      final percentages = _calculateAttendancePercentages();
+      sheet
+          .cell(
+            excel_lib.CellIndex.indexByColumnRow(
+              columnIndex: _dates.length + 1,
+              rowIndex: 2,
+            ),
+          )
+          .value = excel_lib.TextCellValue('אחוז נוכחות');
 
-      // Add header
-      final headerCell = sheet.cell(excel_lib.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 0));
-      headerCell.value = excel_lib.TextCellValue('Attendance Report');
-
-      final courseCell = sheet.cell(excel_lib.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 1));
-      courseCell.value = excel_lib.TextCellValue('$selectedCourse - Section $selectedSection');
-
-      final periodCell = sheet.cell(excel_lib.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 2));
-      periodCell.value = excel_lib.TextCellValue('Period: ${DateFormat('yyyy-MM-dd').format(startDate)} to ${DateFormat('yyyy-MM-dd').format(endDate)}');
-
-      // Add table headers
-      final rollHeaderCell = sheet.cell(excel_lib.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 4));
-      rollHeaderCell.value = excel_lib.TextCellValue('Roll');
-
-      final nameHeaderCell = sheet.cell(excel_lib.CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: 4));
-      nameHeaderCell.value = excel_lib.TextCellValue('Name');
-
-      // Add date headers
-      for (int i = 0; i < datesList.length; i++) {
-        final dateCell = sheet.cell(excel_lib.CellIndex.indexByColumnRow(columnIndex: i + 2, rowIndex: 4));
-        dateCell.value = excel_lib.TextCellValue(datesList[i]);
-      }
-
-      // Add percentage header
-      final percentHeaderCell = sheet.cell(excel_lib.CellIndex.indexByColumnRow(columnIndex: datesList.length + 2, rowIndex: 4));
-      percentHeaderCell.value = excel_lib.TextCellValue('Attendance %');
-
-      // Add student data
-      for (int i = 0; i < students.length; i++) {
-        final student = students[i];
-
-        final rollCell = sheet.cell(excel_lib.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: i + 5));
-        rollCell.value = excel_lib.TextCellValue(student['id']);
-
-        final nameCell = sheet.cell(excel_lib.CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: i + 5));
-        nameCell.value = excel_lib.TextCellValue(student['name']);
-
-        for (int j = 0; j < datesList.length; j++) {
-          final dateStr = datesList[j];
-          final status = attendanceData[student['id']]![dateStr] ?? '-';
-
-          final statusCell = sheet.cell(excel_lib.CellIndex.indexByColumnRow(columnIndex: j + 2, rowIndex: i + 5));
-          statusCell.value = excel_lib.TextCellValue(status);
+      for (var row = 0; row < _students.length; row++) {
+        final student = _students[row];
+        sheet
+            .cell(
+              excel_lib.CellIndex.indexByColumnRow(
+                columnIndex: 0,
+                rowIndex: row + 3,
+              ),
+            )
+            .value = excel_lib.TextCellValue(student.fullName);
+        for (var col = 0; col < _dates.length; col++) {
+          final status = _matrix[student.id]![_dates[col]];
+          final text = _statusLabel(status);
+          sheet
+              .cell(
+                excel_lib.CellIndex.indexByColumnRow(
+                  columnIndex: col + 1,
+                  rowIndex: row + 3,
+                ),
+              )
+              .value = excel_lib.TextCellValue(text);
         }
-
-        // Add percentage value
-        final percentCell = sheet.cell(excel_lib.CellIndex.indexByColumnRow(columnIndex: datesList.length + 2, rowIndex: i + 5));
-        final percentage = percentages[student['id']] ?? 0.0;
-        percentCell.value = excel_lib.TextCellValue('${percentage.toStringAsFixed(1)}%');
+        sheet
+            .cell(
+              excel_lib.CellIndex.indexByColumnRow(
+                columnIndex: _dates.length + 1,
+                rowIndex: row + 3,
+              ),
+            )
+            .value = excel_lib.TextCellValue(
+          '${_percentages[student.id]?.toStringAsFixed(1) ?? '0'}%',
+        );
       }
 
-      // Save the file
-      final fileName = 'attendance_report_${DateFormat('dd_MM_yyyy').format(DateTime.now())}.xlsx';
-      final fileBytes = excel.save();
+      final bytes = excel.encode()!;
+      final fileName =
+          'attendance_${_keyFormatter.format(DateTime.now())}.xlsx';
+
       if (kIsWeb) {
-        // Convert List<int> to Uint8List for web
-        final bytes = Uint8List.fromList(fileBytes!);
-        await saveFileWeb(bytes, fileName, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        if (mounted) {
-          setState(() { isLoading = false; });
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Excel file downloaded!")),
-          );
-        }
-        return;
-      }
-      // Desktop/Mobile: use file picker (desktop) or save to documents directory (mobile)
-      String? path;
-      if (Platform.isAndroid || Platform.isIOS) {
-        final directory = await getApplicationDocumentsDirectory();
-        path = '${directory.path}/$fileName';
+        await saveFileWeb(
+          Uint8List.fromList(bytes),
+          fileName,
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('הקובץ ירד בהצלחה.')));
       } else {
-        path = await _pickExportLocation(fileName, 'xlsx');
+        final path = await _choosePath(fileName: fileName, extension: 'xlsx');
+        if (path != null) {
+          final file = io.File(path);
+          await file.writeAsBytes(bytes, flush: true);
+          await OpenFile.open(path);
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('הקובץ נשמר ב-$path')));
+        }
       }
-      if (path == null) {
-        if (mounted) setState(() { isLoading = false; });
-        return;
-      }
-      final file = File(path);
-      await file.writeAsBytes(fileBytes!);
-      await OpenFile.open(path);
+    } catch (error) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('אירעה שגיאה בייצוא Excel: $error')),
+      );
+    } finally {
       if (mounted) {
-        setState(() {
-          isLoading = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Excel file saved to $path")),
-        );
+        setState(() => _isLoading = false);
       }
-    } catch (e) {
+    }
+  }
+
+  Future<void> _exportToCsv() async {
+    try {
+      setState(() => _isLoading = true);
+      final rows = <List<String>>[];
+      final header = <String>['שם החניך/ה'];
+      header.addAll(_dates.map(_dateFormatter.format));
+      header.add('אחוז נוכחות');
+      rows.add(header);
+
+      for (final student in _students) {
+        final row = <String>[student.fullName];
+        for (final date in _dates) {
+          row.add(_statusLabel(_matrix[student.id]![date]));
+        }
+        row.add('${_percentages[student.id]?.toStringAsFixed(1) ?? '0'}%');
+        rows.add(row);
+      }
+
+      final csvConverter = const ListToCsvConverter();
+      final csvData = csvConverter.convert(rows);
+      final bytes = utf8.encode(csvData);
+      final fileName = 'attendance_${_keyFormatter.format(DateTime.now())}.csv';
+
+      if (kIsWeb) {
+        await saveFileWeb(Uint8List.fromList(bytes), fileName, 'text/csv');
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('קובץ CSV ירד בהצלחה.')));
+      } else {
+        final path = await _choosePath(fileName: fileName, extension: 'csv');
+        if (path != null) {
+          final file = io.File(path);
+          await file.writeAsBytes(bytes, flush: true);
+          await OpenFile.open(path);
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('קובץ CSV נשמר ב-$path')));
+        }
+      }
+    } catch (error) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('אירעה שגיאה בייצוא CSV: $error')));
+    } finally {
       if (mounted) {
-        setState(() {
-          isLoading = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error exporting to Excel: $e")),
-        );
+        setState(() => _isLoading = false);
       }
     }
   }
 
   Future<void> _exportToPdf() async {
     try {
-      if (mounted) {
-        setState(() {
-          isLoading = true;
-        });
-      }
-
+      setState(() => _isLoading = true);
       final pdf = pw.Document();
+      // Using built-in fonts instead of Google Fonts for PDF
+      final regularFont = pw.Font.helvetica();
+      final boldFont = pw.Font.helveticaBold();
 
       pdf.addPage(
         pw.MultiPage(
           pageFormat: PdfPageFormat.a4.landscape,
-          margin: const pw.EdgeInsets.all(32),
-          build: (pw.Context context) {
+          margin: const pw.EdgeInsets.all(24),
+          build: (context) {
             return [
-              pw.Header(
-                level: 0,
-                child: pw.Text('Attendance Report', style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold)),
+              pw.Directionality(
+                textDirection: pw.TextDirection.rtl,
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                  children: [
+                    pw.Text(
+                      'דו"ח נוכחות',
+                      style: pw.TextStyle(font: boldFont, fontSize: 22),
+                    ),
+                    pw.SizedBox(height: 6),
+                    pw.Text(
+                      'תקופה: ${_dateFormatter.format(_startDate)} - ${_dateFormatter.format(_endDate)}',
+                      style: pw.TextStyle(font: regularFont, fontSize: 14),
+                    ),
+                    pw.SizedBox(height: 18),
+                    _buildPdfTable(regularFont, boldFont),
+                  ],
+                ),
               ),
-              pw.SizedBox(height: 8),
-              pw.Text('$selectedCourse - Section $selectedSection', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
-              pw.SizedBox(height: 4),
-              pw.Text('Period: ${DateFormat('yyyy-MM-dd').format(startDate)} to ${DateFormat('yyyy-MM-dd').format(endDate)}',
-                  style: pw.TextStyle(fontSize: 12, color: PdfColors.grey)),
-              pw.SizedBox(height: 20),
-              _buildPdfTable(),
             ];
           },
         ),
       );
 
-      // Save the file
-      final fileName = 'attendance_report_${DateFormat('dd_MM_yyyy').format(DateTime.now())}.pdf';
-      final pdfBytes = await pdf.save();
-      if (kIsWeb) {
-        await saveFileWeb(pdfBytes, fileName, 'application/pdf');
-        if (mounted) {
-          setState(() { isLoading = false; });
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("PDF file downloaded!")),
-          );
-        }
-        return;
-      }
-      // Desktop/Mobile: use file picker (desktop) or save to documents directory (mobile)
-      String? path;
-      if (Platform.isAndroid || Platform.isIOS) {
-        final directory = await getApplicationDocumentsDirectory();
-        path = '${directory.path}/$fileName';
-      } else {
-        path = await _pickExportLocation(fileName, 'pdf');
-      }
-      if (path == null) {
-        if (mounted) setState(() { isLoading = false; });
-        return;
-      }
-      final file = File(path);
-      await file.writeAsBytes(pdfBytes);
-      await OpenFile.open(path);
+      final bytes = await pdf.save();
+      final fileName = 'attendance_${_keyFormatter.format(DateTime.now())}.pdf';
 
-      if (mounted) {
-        setState(() {
-          isLoading = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Pdf file saved to $path")),
-        );
+      if (kIsWeb) {
+        await saveFileWeb(bytes, fileName, 'application/pdf');
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('קובץ PDF ירד בהצלחה.')));
+      } else {
+        final path = await _choosePath(fileName: fileName, extension: 'pdf');
+        if (path != null) {
+          final file = io.File(path);
+          await file.writeAsBytes(bytes, flush: true);
+          await OpenFile.open(path);
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('קובץ PDF נשמר ב-$path')));
+        }
       }
-    } catch (e) {
+    } catch (error) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('אירעה שגיאה בייצוא PDF: $error')));
+    } finally {
       if (mounted) {
-        setState(() {
-          isLoading = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error exporting to Pdf: $e")),
-        );
+        setState(() => _isLoading = false);
       }
     }
   }
 
-  pw.Table _buildPdfTable() {
-    final percentages = _calculateAttendancePercentages();
+  pw.Table _buildPdfTable(pw.Font regularFont, pw.Font boldFont) {
+    final headerCells = <pw.Widget>[
+      pw.Padding(
+        padding: const pw.EdgeInsets.all(6),
+        child: pw.Text(
+          'שם החניך/ה',
+          style: pw.TextStyle(font: boldFont, fontSize: 10),
+        ),
+      ),
+      ..._dates.map(
+        (date) => pw.Padding(
+          padding: const pw.EdgeInsets.all(4),
+          child: pw.Text(
+            _dateFormatter.format(date),
+            style: pw.TextStyle(font: boldFont, fontSize: 9),
+          ),
+        ),
+      ),
+      pw.Padding(
+        padding: const pw.EdgeInsets.all(6),
+        child: pw.Text(
+          'אחוז נוכחות',
+          style: pw.TextStyle(font: boldFont, fontSize: 10),
+        ),
+      ),
+    ];
 
-    return pw.Table(
-      border: pw.TableBorder.all(color: PdfColors.grey300),
-      defaultVerticalAlignment: pw.TableCellVerticalAlignment.middle,
-      children: [
-        // Header row
-        pw.TableRow(
-          decoration: const pw.BoxDecoration(color: PdfColors.grey200),
-          children: [
+    final dataRows =
+        _students.map((student) {
+          final cells = <pw.Widget>[
             pw.Padding(
               padding: const pw.EdgeInsets.all(4),
-              child: pw.Text('Roll', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 7)),
-            ),
-            pw.Padding(
-              padding: const pw.EdgeInsets.all(4),
-              child: pw.Text('Name', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 7)),
-            ),
-            ...datesList.map(
-                  (dateStr) => pw.Padding(
-                padding: const pw.EdgeInsets.all(2),
-                child: pw.Text(dateStr, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 6)),
+              child: pw.Text(
+                student.fullName,
+                style: pw.TextStyle(font: regularFont, fontSize: 9),
               ),
             ),
-            pw.Padding(
-              padding: const pw.EdgeInsets.all(4),
-              child: pw.Text('Attendance %', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 7)),
-            ),
-          ],
-        ),
-        // Data rows
-        ...students.map(
-                (student) {
-              final percentage = percentages[student['id']] ?? 0.0;
-              return pw.TableRow(
-                children: [
-                  pw.Padding(
-                    padding: const pw.EdgeInsets.all(2),
-                    child: pw.Text(
-                      student['id'].toString().length > 4
-                          ? student['id'].toString().substring(0, 4) + '\n' + student['id'].toString().substring(4)
-                          : student['id'].toString(),
-                      style: pw.TextStyle(fontSize: 6),
-                      softWrap: true,
+            ..._dates.map((date) {
+              final status = _matrix[student.id]![date];
+              final text = _statusLabel(status);
+              final color =
+                  status == AttendanceStatus.present
+                      ? PdfColors.green
+                      : status == AttendanceStatus.absent
+                      ? PdfColors.red
+                      : PdfColors.grey700;
+              return pw.Padding(
+                padding: const pw.EdgeInsets.all(3),
+                child: pw.Center(
+                  child: pw.Text(
+                    text,
+                    style: pw.TextStyle(
+                      font: regularFont,
+                      fontSize: 9,
+                      color: color,
                     ),
                   ),
-                  pw.Padding(
-                    padding: const pw.EdgeInsets.all(2),
-                    child: pw.Text(student['name'], style: pw.TextStyle(fontSize: 6)),
-                  ),
-                  ...datesList.map(
-                        (dateStr) {
-                      final status = attendanceData[student['id']]![dateStr] ?? '-';
-                      return pw.Padding(
-                        padding: const pw.EdgeInsets.all(1),
-                        child: pw.Center(
-                          child: pw.Text(
-                            status,
-                            style: pw.TextStyle(
-                              fontSize: 6,
-                              color: status == 'P'
-                                  ? PdfColors.green
-                                  : (status == 'A' ? PdfColors.red : PdfColors.grey),
-                              fontWeight: pw.FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                  pw.Padding(
-                    padding: const pw.EdgeInsets.all(2),
-                    child: pw.Text(
-                      '${percentage.toStringAsFixed(1)}%',
-                      style: pw.TextStyle(
-                        fontSize: 6,
-                        color: percentage >= 75 ? PdfColors.green : PdfColors.red,
-                        fontWeight: pw.FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ],
+                ),
               );
             }),
-      ],
+            pw.Padding(
+              padding: const pw.EdgeInsets.all(4),
+              child: pw.Text(
+                '${_percentages[student.id]?.toStringAsFixed(1) ?? '0'}%',
+                style: pw.TextStyle(font: regularFont, fontSize: 9),
+              ),
+            ),
+          ];
+          return pw.TableRow(children: cells);
+        }).toList();
+
+    return pw.Table(
+      border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.8),
+      children: [pw.TableRow(children: headerCells), ...dataRows],
     );
+  }
+
+  Future<String?> _choosePath({
+    required String fileName,
+    required String extension,
+  }) async {
+    if (io.Platform.isAndroid || io.Platform.isIOS) {
+      final directory = await getApplicationDocumentsDirectory();
+      return '${directory.path}/$fileName';
+    }
+    final result = await FilePicker.platform.saveFile(
+      fileName: fileName,
+      type: FileType.custom,
+      allowedExtensions: [extension],
+    );
+    return result;
+  }
+
+  String _statusLabel(AttendanceStatus? status) {
+    switch (status) {
+      case AttendanceStatus.present:
+        return 'נוכח';
+      case AttendanceStatus.absent:
+        return 'חסר';
+      default:
+        return '-';
+    }
   }
 }
 
+class _ReportTable extends StatelessWidget {
+  const _ReportTable({
+    required this.students,
+    required this.dates,
+    required this.matrix,
+    required this.percentages,
+    required this.dateFormatter,
+  });
+
+  final List<Student> students;
+  final List<DateTime> dates;
+  final Map<String, Map<DateTime, AttendanceStatus?>> matrix;
+  final Map<String, double> percentages;
+  final DateFormat dateFormatter;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: DataTable(
+        headingTextStyle: theme.textTheme.titleSmall?.copyWith(
+          fontWeight: FontWeight.w700,
+        ),
+        dataTextStyle: theme.textTheme.bodyMedium,
+        columns: [
+          const DataColumn(label: Text('שם החניך/ה')),
+          ...dates.map(
+            (date) => DataColumn(label: Text(dateFormatter.format(date))),
+          ),
+          const DataColumn(label: Text('אחוז נוכחות')),
+        ],
+        rows:
+            students.map((student) {
+              final cells = <DataCell>[
+                DataCell(Text(student.fullName)),
+                ...dates.map((date) {
+                  final status = matrix[student.id]![date];
+                  final text =
+                      status == AttendanceStatus.present
+                          ? 'נוכח'
+                          : status == AttendanceStatus.absent
+                          ? 'חסר'
+                          : '-';
+                  final color =
+                      status == AttendanceStatus.present
+                          ? Colors.green[700]
+                          : status == AttendanceStatus.absent
+                          ? Colors.red[700]
+                          : Colors.grey[600];
+                  return DataCell(
+                    Center(
+                      child: Text(
+                        text,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: color,
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+                DataCell(
+                  Text(
+                    '${percentages[student.id]?.toStringAsFixed(1) ?? '0'}%',
+                  ),
+                ),
+              ];
+              return DataRow(cells: cells);
+            }).toList(),
+      ),
+    );
+  }
+}
